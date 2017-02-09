@@ -4,7 +4,7 @@ use Stmt::*;
 use Expr::*;
 
 #[derive(Debug, Clone)]
-struct AST(Vec<Stmt>);
+struct Ast(Vec<Stmt>);
 
 #[derive(Debug, Clone)]
 enum Stmt {
@@ -20,6 +20,39 @@ enum Expr {
     Var(String),
 }
 
+use std::ops::Drop;
+
+struct Scope<'a>(&'a mut Interpreter);
+
+impl <'a> Scope<'a> {
+    fn new(interpreter: &'a mut Interpreter) -> Self {
+        interpreter.in_scope();
+        Scope(interpreter)
+    }
+}
+
+impl <'a> Drop for Scope<'a> {
+    fn drop(&mut self) {
+        self.0.out_scope();
+    }
+}
+
+use std::ops::{Deref, DerefMut};
+
+impl <'a> Deref for Scope<'a> {
+    type Target = Interpreter;
+    fn deref(&self) -> &Interpreter {
+        self.0
+    }
+}
+
+impl <'a> DerefMut for Scope<'a> {
+    fn deref_mut(&mut self) -> &mut Interpreter {
+        self.0
+    }
+}
+
+
 use std::collections::HashMap;
 
 struct Interpreter {
@@ -30,21 +63,53 @@ struct Interpreter {
 impl Interpreter {
 
     pub fn new() -> Self {
-        Interpreter { symbol_table: HashMap::new() }
+        Interpreter { symbol_tables: Vec::new(), pos: 0 }
+    }
+
+    fn in_scope(&mut self) {
+        let pos = self.pos;
+
+        if self.symbol_tables.len() <= pos {
+            self.symbol_tables.push(HashMap::new());
+        } else {
+            self.symbol_tables[pos-1].clear();
+        }
+        self.pos += 1;
+    }
+
+    fn out_scope(&mut self) {
+        self.pos -= 1;
     }
 
     fn add_symbol(&mut self, name: String, expr: Expr) {
-        self.symbol_table.insert(name, expr);
+        let pos = self.pos - 1;
+        self.symbol_tables[pos].insert(name, expr);
     }
 
     fn find_symbol(&self, name: &str) -> Expr {
-        self.symbol_table.get(name).expect("reference to unknown variable").clone()
+        let pos = self.pos;
+        for table in self.symbol_tables[0..pos].iter().rev() {
+            if let Some(e) = table.get(name) {
+                return e.clone()
+            }
+        }
+        panic!("reference to unknown variable")
     }
 
-    fn run(&mut self, ast: AST) {
+    fn run(&mut self, ast: Ast) {
+
+        let mut scope = Scope::new(self);
+
+        // self.in_scope();
+
         for stmt in ast.0 {
-            self.run_stmt(stmt);
+            // self.run_stmt(stmt);
+            scope.run_stmt(stmt);
         }
+
+        // self.out_scope();
+
+        // scope will be dropped and out_scope() will be called.
     }
 
     fn run_stmt(&mut self, stmt: Stmt) {
@@ -61,9 +126,13 @@ impl Interpreter {
                 println!("");
             },
             Block(stmts) => {
+                let mut scope = Scope::new(self);
+                // self.in_scope();
                 for s in stmts {
-                    self.run_stmt(s);
+                    // self.run_stmt(s);
+                    scope.run_stmt(s);
                 }
+                // self.out_scope();
             },
         }
     }
@@ -121,7 +190,7 @@ fn main() {
     let line8 = Print(vec![Str("x = ".to_string()), Var("x".to_string())]);
     let line9 = Print(vec![Str("y = ".to_string()), Var("y".to_string())]);
 
-    let ast = AST(vec![line1,
+    let ast = Ast(vec![line1,
                        line2,
                        line3,
                        line4,
